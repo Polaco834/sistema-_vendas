@@ -1,0 +1,114 @@
+import { useState } from "react";
+import { Toaster } from "@/components/ui/toaster";
+import { Toaster as Sonner } from "@/components/ui/sonner";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { BrowserRouter, Routes, Route } from "react-router-dom";
+import Index from "./pages/Index";
+import Vendas from "./pages/Vendas";
+import { ClientsPage } from "./pages/Clients";
+import Equipes from "./pages/Equipes";
+import Financeiro from "./pages/Financeiro";
+import Caixa from "./pages/Caixa";
+import Mensagens from "./pages/Mensagens";
+import Configuracoes from "./pages/Configuracoes";
+import AuthPage from "./pages/Auth";
+import CompanyForm from "./components/CompanyForm";
+import { MainLayout } from "./components/MainLayout";
+import { ToastContainer } from 'react-toastify';
+import 'react-toastify/dist/ReactToastify.css';
+
+const queryClient = new QueryClient();
+
+const App = () => {
+  const [showCompanyForm, setShowCompanyForm] = useState(false);
+
+  return (
+    <QueryClientProvider client={queryClient}>
+      <TooltipProvider>
+        <BrowserRouter>
+          <div className="min-h-screen bg-background">
+            <Routes>
+              <Route path="/auth" element={<AuthPage />} />
+              <Route
+                path="/"
+                element={
+                  <MainLayout onShowCompanyForm={() => setShowCompanyForm(true)}>
+                    <Index />
+                  </MainLayout>
+                }
+              />
+              <Route
+                path="/vendas"
+                element={
+                  <MainLayout onShowCompanyForm={() => setShowCompanyForm(true)}>
+                    <Vendas />
+                  </MainLayout>
+                }
+              />
+              <Route
+                path="/clientes"
+                element={
+                  <MainLayout onShowCompanyForm={() => setShowCompanyForm(true)}>
+                    <ClientsPage />
+                  </MainLayout>
+                }
+              />
+              <Route
+                path="/equipes"
+                element={
+                  <MainLayout onShowCompanyForm={() => setShowCompanyForm(true)}>
+                    <Equipes />
+                  </MainLayout>
+                }
+              />
+              <Route
+                path="/financeiro"
+                element={
+                  <MainLayout onShowCompanyForm={() => setShowCompanyForm(true)}>
+                    <Financeiro />
+                  </MainLayout>
+                }
+              />
+              <Route
+                path="/caixa"
+                element={
+                  <MainLayout onShowCompanyForm={() => setShowCompanyForm(true)}>
+                    <Caixa />
+                  </MainLayout>
+                }
+              />
+              <Route
+                path="/mensagens"
+                element={
+                  <MainLayout onShowCompanyForm={() => setShowCompanyForm(true)}>
+                    <Mensagens />
+                  </MainLayout>
+                }
+              />
+              <Route
+                path="/configuracoes"
+                element={
+                  <MainLayout onShowCompanyForm={() => setShowCompanyForm(true)}>
+                    <Configuracoes />
+                  </MainLayout>
+                }
+              />
+            </Routes>
+            {showCompanyForm && (
+              <CompanyForm
+                onClose={() => setShowCompanyForm(false)}
+                isInitialSetup={false}
+              />
+            )}
+            <Toaster />
+            <Sonner />
+            <ToastContainer />
+          </div>
+        </BrowserRouter>
+      </TooltipProvider>
+    </QueryClientProvider>
+  );
+};
+
+export default App;
