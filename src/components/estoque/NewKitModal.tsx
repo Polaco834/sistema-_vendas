@@ -21,9 +21,10 @@ const formSchema = z.object({
 interface NewKitModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  onSuccess?: () => void;
 }
 
-export default function NewKitModal({ open, onOpenChange }: NewKitModalProps) {
+export default function NewKitModal({ open, onOpenChange, onSuccess }: NewKitModalProps) {
   const { products, loading, createKit } = useProducts();
   const [selectedProducts, setSelectedProducts] = React.useState<Set<string>>(new Set());
   const [quantities, setQuantities] = React.useState<Record<string, number>>({});
@@ -62,38 +63,28 @@ export default function NewKitModal({ open, onOpenChange }: NewKitModalProps) {
     form.setValue("preco_venda", suggestedPrice.toFixed(2));
   };
 
-  const onSubmit = async (data: z.infer<typeof formSchema>) => {
+  const handleSubmit = async (values: z.infer<typeof formSchema>) => {
     try {
-      console.log('Submitting form with data:', data);
-      console.log('Selected products:', Array.from(selectedProducts));
-      console.log('Quantities:', quantities);
-
-      if (selectedProducts.size === 0) {
-        toast.error("Selecione pelo menos um produto para o kit");
-        return;
-      }
-
-      const kitProducts = Array.from(selectedProducts).map(productId => ({
-        id: productId,
-        quantidade: quantities[productId] || 1
-      }));
-
-      console.log('Creating kit with products:', kitProducts);
-
       await createKit({
-        nome: data.nome,
-        preco_venda: parseFloat(data.preco_venda.replace(',', '.')),
-        produtos: kitProducts
+        nome: values.nome,
+        preco_venda: Number(values.preco_venda),
+        produtos: Array.from(selectedProducts).map(id => ({
+          id,
+          quantidade: quantities[id] || 1
+        }))
       });
 
-      toast.success("Kit criado com sucesso!");
+      onSuccess?.();
       form.reset();
       setSelectedProducts(new Set());
       setQuantities({});
-      onOpenChange(false);
     } catch (error) {
       console.error('Error creating kit:', error);
-      toast.error("Erro ao criar kit");
+      toast({
+        title: "Erro ao criar kit",
+        description: "Não foi possível criar o kit. Tente novamente.",
+        variant: "destructive"
+      });
     }
   };
 
@@ -147,7 +138,7 @@ export default function NewKitModal({ open, onOpenChange }: NewKitModalProps) {
         </DialogHeader>
 
         <Form {...form}>
-          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+          <form onSubmit={form.handleSubmit(handleSubmit)} className="space-y-4">
             <div className="grid grid-cols-12 gap-6 items-end">
               <div className="col-span-5">
                 <FormField

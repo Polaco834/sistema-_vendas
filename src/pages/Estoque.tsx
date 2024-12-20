@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -9,14 +9,22 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Package2, PackagePlus, ImageIcon, Plus, Search } from "lucide-react";
+import { Package2, PackagePlus, ImageIcon, Plus, Search, PlusCircle } from "lucide-react";
 import NewProductModal from '@/components/estoque/NewProductModal';
 import KitDetailsModal from '@/components/estoque/KitDetailsModal';
+import NewKitModal from '@/components/estoque/NewKitModal';
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "@/components/ui/tabs";
 import { useToast } from "@/components/ui/use-toast";
 import { EstoqueItem, useEstoque } from '@/hooks/useEstoque';
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { useProducts } from '@/hooks/useProducts';
 import { useKitDetails } from '@/hooks/useKitDetails';
+import { useKits, Kit } from '@/hooks/useKits';
 
 interface Product extends EstoqueItem {
   nome?: string; // Campo adicional para compatibilidade
@@ -29,151 +37,279 @@ interface KitItem {
   preco_venda_kit: number;
   margem_lucro_kit: number;
   quantidade_itens_kit: number;
+  items?: any[];
+}
+
+interface Kit {
+  id: number;
+  nome: string;
+  preco_venda: number;
+  items: any[];
 }
 
 export default function Estoque() {
-  const { items, loading, fetchItems } = useEstoque();
+  const { items, loading: itemsLoading, fetchItems } = useEstoque();
+  const { kits, loading: kitsLoading, fetchKits } = useKits();
   const [isProductModalOpen, setIsProductModalOpen] = useState(false);
+  const [isKitModalOpen, setIsKitModalOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
+  const [kitSearchTerm, setKitSearchTerm] = useState('');
   const { toast } = useToast();
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
-  const [selectedKit, setSelectedKit] = useState<KitItem | null>(null);
+  const [selectedKit, setSelectedKit] = useState<Kit | null>(null);
   const [isKitDetailsModalOpen, setIsKitDetailsModalOpen] = useState(false);
+  const [selectedTab, setSelectedTab] = useState('produtos');
   const { getProductById } = useProducts();
   const { getKitDetails } = useKitDetails();
 
-  const handleProductClick = async (item: EstoqueItem) => {
-    try {
-      const productData = await getProductById(item.produto_id);
-      if (productData) {
-        setSelectedProduct(productData);
-        setIsProductModalOpen(true);
-      }
-    } catch (error) {
-      console.error('Error loading product:', error);
-      toast({
-        title: "Erro ao carregar produto",
-        description: "Não foi possível carregar os dados do produto para edição.",
-        variant: "destructive",
-      });
+  useEffect(() => {
+    fetchItems();
+  }, [fetchItems]);
+
+  useEffect(() => {
+    if (selectedTab === 'kits') {
+      fetchKits();
     }
-  };
+  }, [selectedTab, fetchKits]);
 
-  // Limpa o produto selecionado quando o modal é fechado
-  const handleModalClose = (open: boolean) => {
-    if (!open) {
-      setSelectedProduct(null);
-    }
-    setIsProductModalOpen(open);
-  };
-
-  // Função para abrir o modal de novo produto
-  const handleNewProduct = () => {
-    setSelectedProduct(null);
-    setIsProductModalOpen(true);
-  };
-
-  const handleKitClick = async (kit: KitItem) => {
-    try {
-      const kitDetails = await getKitDetails(kit.kit_id.toString());
-      setSelectedKit({
-        ...kit,
-        items: kitDetails.items
-      });
-      setIsKitDetailsModalOpen(true);
-    } catch (error) {
-      console.error('Error loading kit details:', error);
-      toast({
-        title: "Erro ao carregar detalhes do kit",
-        description: "Não foi possível carregar os itens do kit.",
-        variant: "destructive",
-      });
-    }
-  };
-
-  const handleEditKit = () => {
-    // Aqui você pode implementar a lógica para editar o kit
-    setIsKitDetailsModalOpen(false);
-    // Adicione aqui a lógica para abrir o modal de edição
-  };
-
-  // Filtra os itens baseado na busca
   const filteredItems = useMemo(() => {
+    if (itemsLoading) return [];
     return items.filter(item => {
       if (!item) return false;
       const itemName = item.nome || '';
       return itemName.toLowerCase().includes(searchTerm.toLowerCase());
     });
-  }, [items, searchTerm]);
+  }, [items, searchTerm, itemsLoading]);
 
-  // Efeito para carregar os itens quando mudar a aba
-  useEffect(() => {
-    if (!loading) {
-      fetchItems(false);
+  const filteredKits = useMemo(() => {
+    if (kitsLoading) return [];
+    return kits.filter(kit => 
+      kitSearchTerm 
+        ? kit.nome_kit.toLowerCase().includes(kitSearchTerm.toLowerCase())
+        : true
+    );
+  }, [kits, kitSearchTerm, kitsLoading]);
+
+  const handleNewProduct = useCallback(() => {
+    setSelectedProduct(null);
+    setIsProductModalOpen(true);
+  }, []);
+
+  const handleNewKit = useCallback(() => {
+    setIsKitModalOpen(true);
+  }, []);
+
+  const handleKitClick = useCallback(async (kit: Kit) => {
+    try {
+      const kitDetails = await getKitDetails(kit.id.toString());
+      setSelectedKit({
+        ...kit,
+        items: kitDetails?.items || []
+      });
+      setIsKitDetailsModalOpen(true);
+    } catch (error) {
+      console.error('Error loading kit details:', error);
+      toast({
+        title: "Erro ao carregar detalhes",
+        description: "Não foi possível carregar os detalhes do kit",
+        variant: "destructive"
+      });
     }
-  }, [fetchItems, loading]);
+  }, [getKitDetails, toast]);
+
+  const handleProductClick = useCallback((product: Product) => {
+    setSelectedProduct(product);
+    setIsProductModalOpen(true);
+  }, []);
+
+  const handleEditKit = useCallback(() => {
+    fetchKits();
+    setIsKitDetailsModalOpen(false);
+    setSelectedKit(null);
+  }, [fetchKits]);
 
   return (
-    <div className="container mx-auto p-6">
-      <div className="flex flex-col gap-4">
-        <div className="flex justify-between">
-          <div className="space-y-1">
-            <h2 className="text-2xl font-semibold tracking-tight">
-              Estoque
-            </h2>
-            <p className="text-sm text-muted-foreground">
-              Gerencie seus produtos e quantidades em estoque
-            </p>
-          </div>
-        </div>
-
-        <div className="space-y-4">
-          <div className="flex items-center gap-2">
-            <Input
-              placeholder="Buscar produtos..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="max-w-sm"
-            />
-          </div>
-
-          <div className="rounded-md border">
-            <ProductTable 
-              items={filteredItems} 
-              loading={loading}
-              handleProductClick={handleProductClick}
-            />
-          </div>
+    <div className="container mx-auto py-6">
+      <div className="flex justify-between items-center mb-6">
+        <div className="space-y-1">
+          <h2 className="text-2xl font-semibold tracking-tight">
+            Estoque
+          </h2>
+          <p className="text-sm text-muted-foreground">
+            Gerencie seus produtos e kits em estoque
+          </p>
         </div>
       </div>
 
+      <Tabs defaultValue="produtos" className="w-full" value={selectedTab} onValueChange={setSelectedTab}>
+        <div className="flex items-center justify-between gap-4">
+          <div className="flex items-center gap-4 flex-1">
+            <TabsList className="h-10 bg-muted/50 dark:bg-muted/80">
+              <TabsTrigger 
+                value="produtos"
+                className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground"
+              >
+                Produtos
+              </TabsTrigger>
+              <TabsTrigger 
+                value="kits"
+                className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground"
+              >
+                Kits
+              </TabsTrigger>
+            </TabsList>
+
+            <div className="flex gap-2 items-center flex-1 max-w-md">
+              <Input
+                placeholder={`Buscar ${selectedTab === 'produtos' ? 'produtos' : 'kits'}...`}
+                value={selectedTab === 'produtos' ? searchTerm : kitSearchTerm}
+                onChange={(e) => selectedTab === 'produtos' 
+                  ? setSearchTerm(e.target.value)
+                  : setKitSearchTerm(e.target.value)
+                }
+                className="w-full"
+              />
+              <Button variant="outline" size="icon">
+                <Search className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+
+          <Button 
+            onClick={selectedTab === 'produtos' ? handleNewProduct : handleNewKit}
+            className="bg-primary hover:bg-primary/90"
+          >
+            <PlusCircle className="mr-2 h-5 w-5" />
+            {selectedTab === 'produtos' ? 'Novo Produto' : 'Novo Kit'}
+          </Button>
+        </div>
+
+        <TabsContent value="produtos" className="mt-6">
+          <div className="rounded-md border">
+            <ProductTable 
+              items={filteredItems} 
+              loading={itemsLoading}
+              handleProductClick={handleProductClick}
+            />
+          </div>
+        </TabsContent>
+
+        <TabsContent value="kits" className="mt-6">
+          <div className="rounded-md border">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Nome do Kit</TableHead>
+                  <TableHead className="text-right">Preço Venda</TableHead>
+                  <TableHead className="text-right">Preço Total</TableHead>
+                  <TableHead className="text-right">Margem Lucro</TableHead>
+                  <TableHead className="text-center">Qtd. Itens</TableHead>
+                  <TableHead className="text-center">Ações</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {kitsLoading ? (
+                  <TableRow>
+                    <TableCell colSpan={6} className="text-center py-4">
+                      Carregando kits...
+                    </TableCell>
+                  </TableRow>
+                ) : filteredKits.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={6} className="text-center py-4">
+                      Nenhum kit encontrado
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  filteredKits.map((kit) => (
+                    <TableRow key={kit.id}>
+                      <TableCell>{kit.nome_kit}</TableCell>
+                      <TableCell className="text-right">
+                        {new Intl.NumberFormat('pt-BR', {
+                          style: 'currency',
+                          currency: 'BRL'
+                        }).format(kit.preco_venda_kit)}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        {new Intl.NumberFormat('pt-BR', {
+                          style: 'currency',
+                          currency: 'BRL'
+                        }).format(kit.preco_total_kit)}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        {new Intl.NumberFormat('pt-BR', {
+                          style: 'percent',
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2
+                        }).format(kit.margem_lucro_kit / 100)}
+                      </TableCell>
+                      <TableCell className="text-center">
+                        {kit.quantidade_itens_kit}
+                      </TableCell>
+                      <TableCell className="text-center">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleKitClick(kit)}
+                        >
+                          Ver Detalhes
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </div>
+        </TabsContent>
+      </Tabs>
+
       <NewProductModal
         open={isProductModalOpen}
-        onOpenChange={handleModalClose}
+        onOpenChange={setIsProductModalOpen}
         product={selectedProduct}
         onSuccess={() => {
-          handleModalClose(false);
+          setIsProductModalOpen(false);
           toast({
             title: selectedProduct ? "Dados atualizados" : "Produto cadastrado",
             description: selectedProduct
               ? "Os dados foram atualizados com sucesso."
               : "O produto foi cadastrado com sucesso.",
           });
-          fetchItems(false);
+          fetchItems();
+        }}
+      />
+
+      <NewKitModal
+        open={isKitModalOpen}
+        onOpenChange={setIsKitModalOpen}
+        onSuccess={() => {
+          setIsKitModalOpen(false);
+          toast({
+            title: "Kit cadastrado",
+            description: "O kit foi cadastrado com sucesso.",
+          });
+          fetchKits();
         }}
       />
 
       {selectedKit && (
         <KitDetailsModal
           isOpen={isKitDetailsModalOpen}
-          onClose={() => setIsKitDetailsModalOpen(false)}
+          onClose={() => {
+            setIsKitDetailsModalOpen(false);
+            setSelectedKit(null);
+          }}
           kit={{
-            id: selectedKit.kit_id.toString(),
+            id: selectedKit.id.toString(),
             name: selectedKit.nome_kit,
             sale_price: selectedKit.preco_venda_kit,
             items: selectedKit.items || []
           }}
-          onEdit={handleEditKit}
+          onUpdate={() => {
+            fetchKits();
+            handleEditKit();
+          }}
         />
       )}
     </div>
