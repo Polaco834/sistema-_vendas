@@ -19,7 +19,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { showToast } from "../ui/custom-toast"
 import { supabase } from "@/integrations/supabase/client"
-import { useCompanyData } from "@/hooks/useCompanyData"
+import { useProducts } from "@/hooks/useProducts"
 import { Product, ProdutoKit } from "@/types/produto"
 
 interface EditProductInKitModalProps {
@@ -39,52 +39,25 @@ export default function EditProductInKitModal({
   onUpdate,
   onProductUpdated,
 }: EditProductInKitModalProps) {
-  const [products, setProducts] = useState<Product[]>([]);
-  const [selectedProduct, setSelectedProduct] = useState<string>(product.produto_id);
+  const [selectedProduct, setSelectedProduct] = useState<string>(product.product.id);
   const [quantity, setQuantity] = useState<number>(product.quantidade);
-  const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
-  const { empresa_id, isLoading: isLoadingCompany } = useCompanyData();
+  const { products, loading: isLoading } = useProducts();
 
-  // Reset form when modal closes
+  // Filtrar apenas produtos que não são kits
+  const availableProducts = products.filter(p => !p.is_kit);
+
   useEffect(() => {
-    if (!isOpen) {
-      setSelectedProduct(product.produto_id);
+    console.log('Product changed:', {
+      productId: product?.product?.id,
+      availableProducts: availableProducts.map(p => ({ id: p.id, nome: p.nome }))
+    });
+
+    if (product?.product?.id) {
+      setSelectedProduct(product.product.id);
       setQuantity(product.quantidade);
-      setProducts([]);
     }
-  }, [isOpen, product]);
-
-  // Fetch products
-  useEffect(() => {
-    const fetchProducts = async () => {
-      if (!isOpen || isLoadingCompany || !empresa_id) return;
-
-      try {
-        setIsLoading(true);
-        const { data, error } = await supabase
-          .from('produtos')
-          .select("*")
-          .eq('empresa_id', empresa_id)
-          .eq('is_kit', false);
-
-        if (error) throw error;
-
-        setProducts(data ?? []);
-      } catch (error) {
-        console.error('Erro ao buscar produtos:', error);
-        showToast({
-          title: "Erro ao carregar produtos",
-          description: "Não foi possível carregar a lista de produtos",
-          variant: "destructive"
-        });
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    fetchProducts();
-  }, [isOpen, empresa_id, isLoadingCompany]);
+  }, [product, products]);
 
   const handleSave = async () => {
     try {
@@ -97,51 +70,100 @@ export default function EditProductInKitModal({
         return;
       }
 
+      // Se o produto selecionado é diferente do produto atual, verificar se já existe no kit
+      if (selectedProduct !== product.product.id) {
+        console.log('Verificando produto duplicado:', {
+          kitId,
+          selectedProduct,
+          currentProductId: product.product.id
+        });
+
+        // Verificar se o produto já existe no kit
+        const { data: existingProducts, error: checkError } = await supabase
+          .from("produtos_kit")
+          .select("*")
+          .eq("kit_id", kitId);
+
+        console.log('Produtos existentes no kit:', existingProducts);
+
+        if (checkError) {
+          console.error('Erro ao verificar produtos:', checkError);
+          throw checkError;
+        }
+
+        const isDuplicate = existingProducts?.some(
+          (p) => p.produto_id === selectedProduct && p.id !== product.id
+        );
+
+        console.log('Verificação de duplicidade:', {
+          isDuplicate,
+          existingProducts: existingProducts?.map(p => ({
+            id: p.id,
+            produto_id: p.produto_id,
+            kit_id: p.kit_id
+          }))
+        });
+
+        if (isDuplicate) {
+          showToast({
+            title: "Erro ao salvar",
+            description: "Este produto já está incluído no kit",
+            variant: "destructive"
+          });
+          return;
+        }
+      }
+
       setIsSaving(true);
+
+      console.log('Atualizando produto:', {
+        kitId,
+        oldProductId: product.product.id,
+        newProductId: selectedProduct,
+        quantity,
+        productId: product.id
+      });
 
       // Atualizar o registro na tabela produtos_kit
       const { error: updateError } = await supabase
         .from("produtos_kit")
         .update({
           produto_id: selectedProduct,
-          quantidade: quantity,
-          kit_id: kitId
+          quantidade: quantity
         })
-        .eq("id", product.id);
+        .eq("id", product.id); // Usar o ID do registro ao invés de kit_id e produto_id
 
-      if (updateError) throw updateError;
-
-      // Buscar o produto atualizado
-      const { data: updatedKitProduct, error: fetchError } = await supabase
-        .from('produtos_kit')
-        .select(`
-          id,
-          kit_id,
-          produto_id,
-          quantidade,
-          produto:produtos (
-            id,
-            nome,
-            preco_venda
-          )
-        `)
-        .eq('id', product.id)
-        .single();
-
-      if (fetchError) throw fetchError;
-
-      if (!updatedKitProduct) {
-        throw new Error('Produto não encontrado após atualização');
+      if (updateError) {
+        console.error('Erro ao atualizar:', updateError);
+        throw updateError;
       }
+
+      // Buscar o produto atualizado para retornar os dados completos
+      const selectedProductData = products.find(p => p.id === selectedProduct);
+      if (!selectedProductData) {
+        throw new Error('Produto não encontrado');
+      }
+
+      const updatedProduct = {
+        id: product.id,
+        kit_id: kitId,
+        produto_id: selectedProduct,
+        quantidade: quantity,
+        product: {
+          id: selectedProductData.id,
+          nome: selectedProductData.nome,
+          preco_venda: selectedProductData.preco_venda
+        }
+      };
 
       showToast({
         title: "Sucesso",
         description: "Produto atualizado com sucesso",
       });
 
-      onProductUpdated(updatedKitProduct);
-      onUpdate();
-      onClose();
+      // Atualizar o estado local e notificar o componente pai
+      onProductUpdated(updatedProduct);
+      if (onUpdate) onUpdate();
     } catch (error) {
       console.error("Erro ao salvar produto:", error);
       showToast({
@@ -154,36 +176,44 @@ export default function EditProductInKitModal({
     }
   };
 
+  // Log para debug
+  console.log('Current state:', {
+    selectedProduct,
+    availableProducts: availableProducts.map(p => ({ id: p.id, nome: p.nome })),
+    productId: product?.product?.id
+  });
+
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent>
-        <DialogHeader>
+      <DialogContent className="p-6">
+        <DialogHeader className="mb-6">
           <DialogTitle>Editar Produto no Kit</DialogTitle>
         </DialogHeader>
 
-        <div className="space-y-4 py-4">
-          <div className="space-y-2">
+        <div className="space-y-6 py-4">
+          <div className="space-y-4">
             <Label>Produto</Label>
             <Select
               value={selectedProduct}
               onValueChange={setSelectedProduct}
               disabled={isLoading || isSaving}
             >
-              <SelectTrigger>
-                <SelectValue placeholder={
-                  isLoading 
-                    ? "Carregando produtos..." 
-                    : "Selecione um produto"
-                } />
+              <SelectTrigger className="w-full">
+                <SelectValue>
+                  {isLoading 
+                    ? "Carregando..." 
+                    : availableProducts.find(p => p.id === selectedProduct)?.nome || "Selecione um produto"
+                  }
+                </SelectValue>
               </SelectTrigger>
               <SelectContent>
                 <SelectGroup>
-                  {products.map((product) => (
+                  {availableProducts.map((prod) => (
                     <SelectItem 
-                      key={product.id} 
-                      value={product.id}
+                      key={prod.id} 
+                      value={prod.id}
                     >
-                      {product.nome} {product.preco_venda ? `- R$ ${product.preco_venda.toFixed(2)}` : ''}
+                      {prod.nome}
                     </SelectItem>
                   ))}
                 </SelectGroup>
@@ -191,7 +221,7 @@ export default function EditProductInKitModal({
             </Select>
           </div>
 
-          <div className="space-y-2">
+          <div className="space-y-4">
             <Label>Quantidade</Label>
             <Input
               type="number"
@@ -203,7 +233,7 @@ export default function EditProductInKitModal({
           </div>
         </div>
 
-        <DialogFooter>
+        <DialogFooter className="mt-6">
           <Button variant="outline" onClick={onClose} disabled={isSaving}>
             Cancelar
           </Button>

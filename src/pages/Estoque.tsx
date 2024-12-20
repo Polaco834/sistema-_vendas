@@ -27,24 +27,21 @@ import { useKitDetails } from '@/hooks/useKitDetails';
 import { useKits, Kit } from '@/hooks/useKits';
 
 interface Product extends EstoqueItem {
-  nome?: string; // Campo adicional para compatibilidade
+  nome?: string;
 }
 
-interface KitItem {
-  kit_id: number;
-  nome_kit: string;
-  preco_total_kit: number;
-  preco_venda_kit: number;
-  margem_lucro_kit: number;
-  quantidade_itens_kit: number;
-  items?: any[];
-}
-
-interface Kit {
-  id: number;
+interface KitDetails {
+  id: string;
   nome: string;
   preco_venda: number;
-  items: any[];
+  items: {
+    product: {
+      id: string;
+      nome: string;
+      preco_venda: number;
+    };
+    quantidade: number;
+  }[];
 }
 
 export default function Estoque() {
@@ -56,7 +53,7 @@ export default function Estoque() {
   const [kitSearchTerm, setKitSearchTerm] = useState('');
   const { toast } = useToast();
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
-  const [selectedKit, setSelectedKit] = useState<Kit | null>(null);
+  const [selectedKit, setSelectedKit] = useState<KitDetails | null>(null);
   const [isKitDetailsModalOpen, setIsKitDetailsModalOpen] = useState(false);
   const [selectedTab, setSelectedTab] = useState('produtos');
   const { getProductById } = useProducts();
@@ -101,11 +98,25 @@ export default function Estoque() {
 
   const handleKitClick = useCallback(async (kit: Kit) => {
     try {
-      const kitDetails = await getKitDetails(kit.id.toString());
-      setSelectedKit({
-        ...kit,
-        items: kitDetails?.items || []
-      });
+      if (!kit.kit_id) {
+        toast({
+          title: "Erro ao carregar detalhes",
+          description: "ID do kit não encontrado",
+          variant: "destructive"
+        });
+        return;
+      }
+
+      const kitDetails = await getKitDetails(kit.kit_id.toString());
+      if (!kitDetails) {
+        toast({
+          title: "Erro ao carregar detalhes",
+          description: "Não foi possível carregar os detalhes do kit",
+          variant: "destructive"
+        });
+        return;
+      }
+      setSelectedKit(kitDetails);
       setIsKitDetailsModalOpen(true);
     } catch (error) {
       console.error('Error loading kit details:', error);
@@ -300,15 +311,19 @@ export default function Estoque() {
             setIsKitDetailsModalOpen(false);
             setSelectedKit(null);
           }}
-          kit={{
-            id: selectedKit.id.toString(),
-            name: selectedKit.nome_kit,
-            sale_price: selectedKit.preco_venda_kit,
-            items: selectedKit.items || []
+          kit={selectedKit}
+          onEdit={() => {
+            setIsKitModalOpen(true);
+            setIsKitDetailsModalOpen(false);
+          }}
+          onDelete={() => {
+            // Implementaremos a lógica de exclusão depois
+            console.log('Excluir kit:', selectedKit.id);
           }}
           onUpdate={() => {
             fetchKits();
-            handleEditKit();
+            setIsKitDetailsModalOpen(false);
+            setSelectedKit(null);
           }}
         />
       )}

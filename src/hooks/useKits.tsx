@@ -1,9 +1,10 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuthContext } from '@/contexts/AuthContext';
 
 export interface Kit {
   id: number;
+  kit_id: number;
   nome_kit: string;
   preco_venda_kit: number;
   preco_total_kit: number;
@@ -15,7 +16,7 @@ export interface Kit {
 export function useKits() {
   const [kits, setKits] = useState<Kit[]>([]);
   const [loading, setLoading] = useState(false);
-  const { user } = useAuthContext();
+  const { user, userData, refreshUserData } = useAuthContext();
 
   const fetchKits = useCallback(async () => {
     if (!user) return;
@@ -23,15 +24,11 @@ export function useKits() {
     try {
       setLoading(true);
 
-      // Primeiro, buscar o empresa_id do usuário
-      const { data: userData, error: userError } = await supabase
-        .from('usuarios')
-        .select('empresa_id')
-        .eq('user_id', user.id)
-        .single();
-
-      if (userError) throw userError;
-      if (!userData?.empresa_id) throw new Error('No company assigned to user');
+      // Se não tiver userData, tentar recarregar
+      if (!userData?.empresa_id) {
+        await refreshUserData();
+        return; // O useEffect vai chamar fetchKits novamente quando userData for atualizado
+      }
 
       // Buscar os kits da view vw_kit_completo
       const { data: kitsData, error: kitsError } = await supabase
@@ -48,7 +45,14 @@ export function useKits() {
     } finally {
       setLoading(false);
     }
-  }, [user]);
+  }, [user, userData, refreshUserData]);
+
+  // Recarregar kits quando userData mudar
+  useEffect(() => {
+    if (userData?.empresa_id) {
+      fetchKits();
+    }
+  }, [userData, fetchKits]);
 
   return {
     kits,

@@ -4,69 +4,75 @@ import { supabase } from '@/integrations/supabase/client';
 interface KitItem {
   product: {
     id: string;
-    name: string;
+    nome: string;
+    preco_venda: number;
   };
-  quantity: number;
+  quantidade: number;
 }
 
 interface KitDetails {
   id: string;
-  name: string;
-  sale_price: number;
+  nome: string;
+  preco_venda: number;
   items: KitItem[];
 }
 
 export function useKitDetails() {
   const [loading, setLoading] = useState(false);
 
-  const getKitDetails = async (kitId: string): Promise<KitDetails> => {
+  const getKitDetails = async (kitId: string): Promise<KitDetails | null> => {
+    if (!kitId) return null;
+    
     setLoading(true);
     try {
-      // Primeiro, buscar os dados do produto que é o kit
-      const { data: kitProduct, error: kitError } = await supabase
+      // Buscar os dados do kit na tabela produtos
+      const { data: kitData, error: kitError } = await supabase
         .from('produtos')
         .select('*')
         .eq('id', kitId)
         .single();
 
       if (kitError) throw kitError;
+      if (!kitData) return null;
 
-      // Depois, buscar os produtos que compõem o kit
+      // Buscar os produtos que compõem o kit
       const { data: kitItems, error: itemsError } = await supabase
         .from('produtos_kit')
         .select(`
           quantidade,
           produto:produto_id (
             id,
-            nome
+            nome,
+            preco_venda
           )
         `)
-        .eq('kit_id', kitId);
+        .eq('kit_id', kitData.id);
 
       if (itemsError) throw itemsError;
 
       return {
-        id: kitProduct.id,
-        name: kitProduct.nome,
-        sale_price: kitProduct.preco_venda,
-        items: kitItems.map((item: any) => ({
+        id: kitData.id.toString(),
+        nome: kitData.nome,
+        preco_venda: kitData.preco_venda,
+        items: kitItems?.map(item => ({
           product: {
-            id: item.produto.id,
-            name: item.produto.nome
+            id: item.produto.id.toString(),
+            nome: item.produto.nome,
+            preco_venda: item.produto.preco_venda
           },
-          quantity: item.quantidade
-        }))
+          quantidade: item.quantidade
+        })) || []
       };
     } catch (error) {
       console.error('Error fetching kit details:', error);
-      throw error;
+      return null;
     } finally {
       setLoading(false);
     }
   };
 
   return {
-    getKitDetails,
-    loading
+    loading,
+    getKitDetails
   };
 }

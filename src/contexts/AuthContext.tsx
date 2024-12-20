@@ -9,6 +9,7 @@ interface AuthContextType {
   accessTypeData: any;
   loading: boolean;
   empresa_id: number | null;
+  refreshUserData: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType>({ 
@@ -17,7 +18,8 @@ const AuthContext = createContext<AuthContextType>({
   companyData: null,
   accessTypeData: null,
   loading: true, 
-  empresa_id: null 
+  empresa_id: null,
+  refreshUserData: async () => {}
 });
 
 export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
@@ -38,9 +40,11 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
       if (error) throw error;
       setAccessTypeData(data);
+      return data;
     } catch (error) {
       console.error('Error fetching access type data:', error);
       setAccessTypeData(null);
+      return null;
     }
   };
 
@@ -54,9 +58,11 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
       if (error) throw error;
       setCompanyData(data);
+      return data;
     } catch (error) {
       console.error('Error fetching company data:', error);
       setCompanyData(null);
+      return null;
     }
   };
 
@@ -71,20 +77,27 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       if (error) throw error;
       setUserData(data);
       
-      // Fetch company data if empresa_id exists
-      if (data?.empresa_id) {
-        await fetchCompanyData(data.empresa_id);
+      // Fetch company and access type data in parallel
+      if (data) {
+        await Promise.all([
+          data.empresa_id ? fetchCompanyData(data.empresa_id) : null,
+          data.tipo_acesso ? fetchAccessTypeData(data.tipo_acesso) : null
+        ]);
       }
 
-      // Fetch access type data if tipo_acesso exists
-      if (data?.tipo_acesso) {
-        await fetchAccessTypeData(data.tipo_acesso);
-      }
+      return data;
     } catch (error) {
       console.error('Error fetching user data:', error);
       setUserData(null);
       setCompanyData(null);
       setAccessTypeData(null);
+      return null;
+    }
+  };
+
+  const refreshUserData = async () => {
+    if (user) {
+      await fetchUserData(user.id);
     }
   };
 
@@ -138,7 +151,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     companyData,
     accessTypeData,
     loading,
-    empresa_id: userData?.empresa_id ?? null
+    empresa_id: userData?.empresa_id ?? null,
+    refreshUserData
   };
 
   return (

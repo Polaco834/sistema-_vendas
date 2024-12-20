@@ -1,459 +1,404 @@
-import { useState, useEffect } from "react"
-import { Button } from "@/components/ui/button"
+import React from 'react';
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog"
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../ui/table"
-import AddProductToKitModal from "./AddProductToKitModal"
-import EditProductInKitModal from "./EditProductInKitModal"
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog"
-import { Pencil, Trash2 } from "lucide-react"
-import { showToast } from "../ui/custom-toast"
+  DialogFooter,
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Pencil, Trash2 } from "lucide-react";
+import { useState, useEffect, useMemo } from "react"
 import { supabase } from "@/integrations/supabase/client"
 import { Input } from "@/components/ui/input"
 import { Kit, KitItem, ProdutoKit } from "@/types/produto"
+import { useToast } from "@/components/ui/use-toast"
+import { Label } from "@/components/ui/label"
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog"
+import AddProductToKitModal from "./AddProductToKitModal"
+import EditProductInKitModal from "./EditProductInKitModal"
+import { showToast } from "../ui/custom-toast"
 
 interface KitDetailsModalProps {
   isOpen: boolean;
   onClose: () => void;
-  kit: Kit;
-  onUpdate: () => void;
+  kit: {
+    id: string;
+    nome: string;
+    preco_venda: number;
+    items: {
+      id: string;
+      product: {
+        id: string;
+        nome: string;
+        preco_venda: number;
+      };
+      quantidade: number;
+    }[];
+  };
+  onUpdate?: () => void;
+  onEdit?: () => void;
+  onDelete?: () => void;
 }
 
-export default function KitDetailsModal({ isOpen, onClose, kit, onUpdate }: KitDetailsModalProps) {
-  const [isAddProductModalOpen, setIsAddProductModalOpen] = useState(false);
-  const [editingProduct, setEditingProduct] = useState<ProdutoKit | null>(null);
-  const [kitName, setKitName] = useState(kit.name);
-  const [salePrice, setSalePrice] = useState(kit.sale_price.toString());
+export default function KitDetailsModal({ isOpen, onClose, kit, onUpdate, onEdit, onDelete }: KitDetailsModalProps) {
+  if (!kit) return null;
+
+  const { toast } = useToast();
   const [isEditing, setIsEditing] = useState(false);
+  const [editedName, setEditedName] = useState(kit.nome);
+  const [editedPrice, setEditedPrice] = useState(kit.preco_venda);
   const [isSaving, setIsSaving] = useState(false);
-  const [kitItems, setKitItems] = useState<KitItem[]>(kit.items);
+  const [isAddProductModalOpen, setIsAddProductModalOpen] = useState(false);
+  const [isEditProductModalOpen, setIsEditProductModalOpen] = useState(false);
+  const [selectedProduct, setSelectedProduct] = useState<any>(null);
 
-  useEffect(() => {
-    const loadKitDetails = async () => {
-      if (!isOpen || !kit.id) return;
+  const totalValue = useMemo(() => {
+    return kit.items.reduce((total, item) => total + (item.product.preco_venda * item.quantidade), 0);
+  }, [kit.items]);
 
-      try {
-        // Primeiro, buscar os dados básicos do kit
-        const { data: kitData, error: kitError } = await supabase
-          .from('produtos')
-          .select('id, nome, preco_venda, empresa_id')
-          .eq('id', kit.id)
-          .single();
+  const marginValue = useMemo(() => {
+    const margin = ((kit.preco_venda - totalValue) / totalValue) * 100;
+    return isFinite(margin) ? margin : 0;
+  }, [kit.preco_venda, totalValue]);
 
-        if (kitError) throw kitError;
-
-        if (!kitData) {
-          throw new Error('Kit não encontrado');
-        }
-
-        // Depois, buscar os produtos do kit
-        const { data: kitProducts, error: productsError } = await supabase
-          .from('produtos_kit')
-          .select(`
-            id,
-            kit_id,
-            produto_id,
-            quantidade,
-            produto:produtos (
-              id,
-              nome
-            )
-          `)
-          .eq('kit_id', kit.id);
-
-        if (productsError) throw productsError;
-
-        // Formatar os dados
-        const formattedItems = kitProducts.map(item => ({
-          id: item.id,
-          product: {
-            id: item.produto.id,
-            name: item.produto.nome
-          },
-          quantity: item.quantidade
-        }));
-
-        // Atualizar estados com os dados carregados
-        setKitItems(formattedItems);
-        setKitName(kitData.nome);
-        setSalePrice(kitData.preco_venda.toString());
-
-      } catch (error) {
-        showToast({
-          title: "Erro ao carregar detalhes",
-          description: "Não foi possível carregar os detalhes do kit",
-          variant: "destructive"
-        });
-      }
-    };
-
-    loadKitDetails();
-  }, [isOpen, kit.id]);
-
-  useEffect(() => {
-    if (isOpen) {
-      setIsEditing(false);
-    }
-  }, [isOpen]);
-
-  const handleUpdate = () => {
-    onUpdate();
-  };
-
-  const handleSaveKitDetails = async () => {
+  const handleSave = async () => {
     try {
       setIsSaving(true);
-      const salePriceNumber = Number(salePrice);
-      const newName = kitName.trim();
       
-      if (!newName) {
-        showToast({
-          title: "Nome inválido",
-          description: "O nome do kit não pode estar vazio",
-          variant: "destructive"
-        });
-        return;
-      }
-
-      if (isNaN(salePriceNumber) || salePriceNumber < 0) {
-        showToast({
-          title: "Preço inválido",
-          description: "O preço de venda deve ser um número maior ou igual a zero",
-          variant: "destructive"
-        });
-        return;
-      }
-
-      const { data: existingKit, error: searchError } = await supabase
-        .from('produtos')
-        .select('id, nome')
-        .eq('is_kit', true)
-        .eq('nome', newName)
-        .neq('id', kit.id) 
-        .single();
-
-      if (searchError && searchError.code !== 'PGRST116') { 
-        throw searchError;
-      }
-
-      if (existingKit) {
-        showToast({
-          title: "Nome já existe",
-          description: "Já existe um kit com este nome. Por favor, escolha outro nome.",
-          variant: "destructive"
-        });
-        return;
-      }
-
-      const { error } = await supabase
+      // Atualizar o kit na tabela produtos
+      const { error: updateError } = await supabase
         .from('produtos')
         .update({
-          nome: newName,
-          preco_venda: salePriceNumber
+          nome: editedName,
+          preco_venda: editedPrice
         })
         .eq('id', kit.id);
 
-      if (error) throw error;
+      if (updateError) throw updateError;
 
       showToast({
-        title: "Kit atualizado",
-        description: "Nome e preço atualizados com sucesso",
+        title: "Sucesso!",
+        description: "Kit atualizado com sucesso",
+        variant: "success",
       });
 
       setIsEditing(false);
-      handleUpdate();
+      if (onUpdate) onUpdate();
     } catch (error) {
+      console.error('Error updating kit:', error);
       showToast({
-        title: "Erro ao atualizar kit",
-        description: "Não foi possível atualizar o nome e preço do kit",
-        variant: "destructive"
+        title: "Erro!",
+        description: "Erro ao atualizar o kit",
+        variant: "error",
       });
     } finally {
       setIsSaving(false);
     }
   };
 
-  const handleAddProduct = async (product: Omit<KitItem, 'id'>) => {
-    try {
-      // Primeiro, inserir o produto no kit
-      const { error: insertError } = await supabase
-        .from('produtos_kit')
-        .insert({
-          kit_id: kit.id,
-          produto_id: product.product.id,
-          quantidade: product.quantity
-        });
-
-      if (insertError) throw insertError;
-
-      // Depois, buscar os dados do produto inserido
-      const { data: productData, error: productError } = await supabase
-        .from('produtos')
-        .select('id, nome')
-        .eq('id', product.product.id)
-        .single();
-
-      if (productError) throw productError;
-
-      // Atualizar a lista local
-      const newItem: KitItem = {
-        id: `${kit.id}_${product.product.id}`,
-        product: {
-          id: productData.id,
-          name: productData.nome,
-        },
-        quantity: product.quantity
-      };
-
-      setKitItems(prevItems => [...prevItems, newItem]);
-
-      showToast({
-        title: 'Produto adicionado ao kit com sucesso',
-      });
-      handleUpdate();
-    } catch (error) {
-      showToast({
-        title: 'Erro ao adicionar produto ao kit',
-        variant: 'destructive'
-      });
-    }
-  };
-
-  const handleDeleteProduct = async (productId: string) => {
-    try {
-      const { error } = await supabase
-        .from('produtos_kit')
-        .delete()
-        .eq('kit_id', kit.id)
-        .eq('produto_id', productId);
-
-      if (error) throw error;
-
-      setKitItems(prevItems => prevItems.filter(item => item.product.id !== productId));
-
-      showToast({
-        title: 'Produto removido do kit com sucesso',
-      });
-      handleUpdate();
-    } catch (error) {
-      showToast({
-        title: 'Erro ao remover produto do kit',
-        variant: 'destructive'
-      });
-    }
-  };
-
-  const handleProductUpdate = (updatedProduct: ProdutoKit) => {
-    setKitItems(prevItems => 
-      prevItems.map(item => {
-        if (item.id === updatedProduct.id) {
-          return {
-            id: updatedProduct.id,
-            product: {
-              id: updatedProduct.produto_id,
-              name: updatedProduct.produto?.nome || ''
-            },
-            quantity: updatedProduct.quantidade
-          };
-        }
-        return item;
-      })
-    );
-  };
-
   return (
-    <>
-      <Dialog open={isOpen} onOpenChange={onClose}>
-        <DialogContent className="max-w-3xl">
-          <DialogHeader>
-            <DialogTitle>Detalhes do Kit</DialogTitle>
-          </DialogHeader>
+    <Dialog open={isOpen} onOpenChange={onClose}>
+      <DialogContent className="p-6 max-w-4xl">
+        <DialogHeader className="mb-6">
+          <DialogTitle>Detalhes do Kit</DialogTitle>
+        </DialogHeader>
 
-          <div className="space-y-6">
-            {/* Kit Details Section */}
+        <div className="space-y-6">
+          <div className="grid grid-cols-2 gap-6">
             <div className="space-y-4">
-              <div className="flex justify-between items-center">
-                <h3 className="text-lg font-semibold">Informações do Kit</h3>
-                <div className="space-x-2">
-                  {isEditing ? (
-                    <>
-                      <Button
-                        variant="outline"
-                        onClick={() => {
-                          setIsEditing(false);
-                          setKitName(kit.name);
-                          setSalePrice(kit.sale_price.toString());
-                        }}
-                        disabled={isSaving}
-                      >
-                        Cancelar
-                      </Button>
-                      <Button
-                        onClick={handleSaveKitDetails}
-                        disabled={isSaving}
-                      >
-                        {isSaving ? "Salvando..." : "Salvar"}
-                      </Button>
-                    </>
-                  ) : (
-                    <Button
-                      variant="outline"
-                      onClick={() => setIsEditing(true)}
-                    >
-                      Editar Kit
-                    </Button>
-                  )}
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">Nome do Kit</label>
-                  <Input
-                    value={kitName}
-                    onChange={(e) => setKitName(e.target.value)}
-                    disabled={!isEditing}
-                    placeholder="Nome do kit"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">Preço de Venda</label>
-                  <Input
-                    type="number"
-                    value={salePrice}
-                    onChange={(e) => setSalePrice(e.target.value)}
-                    disabled={!isEditing}
-                    placeholder="0.00"
-                    step="0.01"
-                    min="0"
-                  />
-                </div>
-              </div>
+              <Label>Nome do Kit</Label>
+              <Input
+                type="text"
+                value={isEditing ? editedName : kit.nome}
+                onChange={(e) => setEditedName(e.target.value)}
+                disabled={!isEditing}
+              />
             </div>
-
-            {/* Products Section */}
             <div className="space-y-4">
-              <div className="flex justify-between items-center">
-                <h3 className="text-lg font-semibold">Produtos no Kit</h3>
-                <Button onClick={() => setIsAddProductModalOpen(true)}>
-                  Adicionar Produto
-                </Button>
-              </div>
-
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Produto</TableHead>
-                    <TableHead>Quantidade</TableHead>
-                    <TableHead>Ações</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {kitItems.map((item) => (
-                    <TableRow key={item.id}>
-                      <TableCell>{item.product.name}</TableCell>
-                      <TableCell>{item.quantity}</TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex justify-end gap-2">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={async () => {
-                              try {
-                                // Buscar dados completos do produto
-                                const { data: productData, error } = await supabase
-                                  .from('produtos_kit')
-                                  .select(`
-                                    id,
-                                    kit_id,
-                                    produto_id,
-                                    quantidade,
-                                    produto:produtos (
-                                      id,
-                                      nome,
-                                      preco_venda
-                                    )
-                                  `)
-                                  .eq('id', item.id)
-                                  .single();
-
-                                if (error) throw error;
-                                if (!productData) throw new Error('Produto não encontrado');
-
-                                setEditingProduct(productData);
-                              } catch (error) {
-                                showToast({
-                                  title: "Erro",
-                                  description: "Não foi possível iniciar a edição",
-                                  variant: "destructive"
-                                });
-                              }
-                            }}
-                          >
-                            <Pencil className="h-4 w-4" />
-                          </Button>
-                          
-                          <AlertDialog>
-                            <AlertDialogTrigger asChild>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="text-red-600 hover:text-red-700"
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </Button>
-                            </AlertDialogTrigger>
-                            <AlertDialogContent>
-                              <AlertDialogHeader>
-                                <AlertDialogTitle>Confirmar exclusão</AlertDialogTitle>
-                                <AlertDialogDescription>
-                                  Tem certeza que deseja remover este produto do kit?
-                                  Esta ação não pode ser desfeita.
-                                </AlertDialogDescription>
-                              </AlertDialogHeader>
-                              <AlertDialogFooter>
-                                <AlertDialogCancel>Cancelar</AlertDialogCancel>
-                                <AlertDialogAction
-                                  className="bg-red-600 hover:bg-red-700"
-                                  onClick={() => handleDeleteProduct(item.product.id)}
-                                >
-                                  Excluir
-                                </AlertDialogAction>
-                              </AlertDialogFooter>
-                            </AlertDialogContent>
-                          </AlertDialog>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+              <Label>Preço de Venda</Label>
+              <Input
+                type="number"
+                value={isEditing ? editedPrice : kit.preco_venda}
+                onChange={(e) => setEditedPrice(Number(e.target.value))}
+                disabled={!isEditing}
+                step="0.01"
+              />
             </div>
           </div>
-        </DialogContent>
-      </Dialog>
+
+          <div className="flex justify-between items-center mt-8 mb-4">
+            <h3 className="text-lg font-medium">Produtos no Kit</h3>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setIsAddProductModalOpen(true)}
+            >
+              Incluir Produto
+            </Button>
+          </div>
+
+          <div className="rounded-md border">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-[30%]">Produto</TableHead>
+                  <TableHead className="text-right w-[20%]">Vlr Unit.</TableHead>
+                  <TableHead className="text-center w-[15%]">Quantidade</TableHead>
+                  <TableHead className="text-right w-[20%]">Total</TableHead>
+                  <TableHead className="text-right w-[15%]">Ações</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {kit.items.map((item) => (
+                  <TableRow key={item.id}>
+                    <TableCell className="font-medium">{item.product.nome}</TableCell>
+                    <TableCell className="text-right">
+                      {new Intl.NumberFormat('pt-BR', {
+                        style: 'currency',
+                        currency: 'BRL'
+                      }).format(item.product.preco_venda)}
+                    </TableCell>
+                    <TableCell className="text-center">{item.quantidade}</TableCell>
+                    <TableCell className="text-right">
+                      {new Intl.NumberFormat('pt-BR', {
+                        style: 'currency',
+                        currency: 'BRL'
+                      }).format(item.product.preco_venda * item.quantidade)}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex justify-end gap-2">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => {
+                            setSelectedProduct(item);
+                            setIsEditProductModalOpen(true);
+                          }}
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </Button>
+                        <AlertDialog>
+                          <AlertDialogTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </AlertDialogTrigger>
+                          <AlertDialogContent>
+                            <AlertDialogHeader>
+                              <AlertDialogTitle>Remover Produto</AlertDialogTitle>
+                              <AlertDialogDescription>
+                                Tem certeza que deseja remover este produto do kit?
+                              </AlertDialogDescription>
+                            </AlertDialogHeader>
+                            <AlertDialogFooter>
+                              <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                              <AlertDialogAction
+                                variant="destructive"
+                                onClick={async () => {
+                                  try {
+                                    const { error } = await supabase
+                                      .from('produtos_kit')
+                                      .delete()
+                                      .eq('id', item.id);
+
+                                    if (error) throw error;
+
+                                    showToast({
+                                      title: "Sucesso!",
+                                      description: "Produto removido do kit",
+                                      variant: "success",
+                                    });
+
+                                    if (onUpdate) onUpdate();
+                                  } catch (error) {
+                                    console.error('Erro ao remover produto do kit:', error);
+                                    showToast({
+                                      title: "Erro!",
+                                      description: "Erro ao remover produto do kit",
+                                      variant: "error",
+                                    });
+                                  }
+                                }}
+                              >
+                                Remover
+                              </AlertDialogAction>
+                            </AlertDialogFooter>
+                          </AlertDialogContent>
+                        </AlertDialog>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+
+          <div className="flex justify-end items-center mt-4">
+            <div className="grid grid-cols-3 gap-8 text-sm">
+              <div className="flex items-center gap-2">
+                <span className="text-muted-foreground">Vlr Total:</span>
+                <span className="font-semibold">
+                  {new Intl.NumberFormat('pt-BR', {
+                    style: 'currency',
+                    currency: 'BRL'
+                  }).format(totalValue)}
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-muted-foreground">Vlr Venda:</span>
+                <span className="font-semibold">
+                  {new Intl.NumberFormat('pt-BR', {
+                    style: 'currency',
+                    currency: 'BRL'
+                  }).format(kit.preco_venda)}
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-muted-foreground">Margem:</span>
+                <span className="font-semibold">
+                  {new Intl.NumberFormat('pt-BR', {
+                    style: 'percent',
+                    maximumFractionDigits: 2
+                  }).format(marginValue / 100)}
+                </span>
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+        <DialogFooter className="mt-6">
+          <div className="flex justify-end gap-2 w-full">
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button
+                  variant="destructive"
+                  className="mr-auto"
+                >
+                  Excluir Kit
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Excluir Kit</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    Tem certeza que deseja excluir este kit?
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                  <AlertDialogAction
+                    variant="destructive"
+                    onClick={async () => {
+                      try {
+                        // Primeiro excluir todos os produtos do kit
+                        const { error: deleteProductsError } = await supabase
+                          .from('produtos_kit')
+                          .delete()
+                          .eq('kit_id', kit.id);
+
+                        if (deleteProductsError) throw deleteProductsError;
+
+                        // Depois excluir o kit
+                        const { error: deleteKitError } = await supabase
+                          .from('produtos')
+                          .delete()
+                          .eq('id', kit.id);
+
+                        if (deleteKitError) throw deleteKitError;
+
+                        showToast({
+                          title: "Sucesso!",
+                          description: "Kit excluído com sucesso",
+                          variant: "success",
+                        });
+
+                        if (onDelete) onDelete();
+                        onClose();
+                      } catch (error) {
+                        console.error('Erro ao excluir kit:', error);
+                        showToast({
+                          title: "Erro!",
+                          description: "Erro ao excluir o kit",
+                          variant: "error",
+                        });
+                      }
+                    }}
+                  >
+                    Excluir
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+
+            <Button variant="outline" onClick={onClose}>
+              {isEditing ? "Cancelar" : "Fechar"}
+            </Button>
+            {isEditing ? (
+              <Button onClick={handleSave} disabled={isSaving}>
+                {isSaving ? "Salvando..." : "Salvar"}
+              </Button>
+            ) : (
+              <Button onClick={() => setIsEditing(true)}>Editar</Button>
+            )}
+          </div>
+        </DialogFooter>
+      </DialogContent>
 
       <AddProductToKitModal
         isOpen={isAddProductModalOpen}
         onClose={() => setIsAddProductModalOpen(false)}
-        onAdd={handleAddProduct}
-        currentItems={kitItems}
+        onAdd={async (newItem) => {
+          try {
+            const { error } = await supabase
+              .from('produtos_kit')
+              .insert({
+                kit_id: kit.id,
+                produto_id: newItem.product.id,
+                quantidade: newItem.quantidade
+              });
+
+            if (error) throw error;
+
+            showToast({
+              title: "Sucesso!",
+              description: "Produto adicionado ao kit",
+              variant: "success",
+            });
+
+            if (onUpdate) onUpdate();
+          } catch (error) {
+            console.error('Error adding product to kit:', error);
+            showToast({
+              title: "Erro!",
+              description: "Erro ao adicionar produto ao kit",
+              variant: "error",
+            });
+          }
+        }}
+        currentItems={kit.items}
       />
 
-      {editingProduct && (
+      {selectedProduct && (
         <EditProductInKitModal
-          isOpen={true}
-          onClose={() => setEditingProduct(null)}
-          product={editingProduct}
+          isOpen={isEditProductModalOpen}
+          onClose={() => {
+            setIsEditProductModalOpen(false);
+            setSelectedProduct(null);
+          }}
+          product={selectedProduct}
           kitId={kit.id}
-          onProductUpdated={handleProductUpdate}
           onUpdate={onUpdate}
+          onProductUpdated={() => {
+            if (onUpdate) onUpdate();
+          }}
         />
       )}
-    </>
+    </Dialog>
   );
 }
